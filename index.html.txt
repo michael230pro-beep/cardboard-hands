@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <title>Cardboard Hand Tracking</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: black;
+      font-family: Arial, sans-serif;
+    }
+
+    #camera {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    #canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #info {
+      position: fixed;
+      top: 15px;
+      left: 15px;
+      right: 15px;
+      z-index: 10;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(0,0,0,.7);
+      color: white;
+      text-align: center;
+    }
+
+    button {
+      margin-top: 8px;
+      padding: 12px 20px;
+      border: 0;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+
+    #vr {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <video id="camera" autoplay playsinline></video>
+
+  <canvas id="canvas"></canvas>
+
+  <div id="info">
+    🖐️ Hand Tracking<br>
+    <small>Primero permite el acceso a la cámara</small><br>
+    <button id="start">ACTIVAR CÁMARA</button>
+    <br>
+    <button id="vr">MODO CARDBOARD</button>
+  </div>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <script>
+    const video = document.getElementById("camera");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const startButton = document.getElementById("start");
+    const vrButton = document.getElementById("vr");
+
+    let running = false;
+
+    // -----------------------------
+    // CANVAS
+    // -----------------------------
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    resize();
+    window.addEventListener("resize", resize);
+
+
+    // -----------------------------
+    // MEDIAPIPE HANDS
+    // -----------------------------
+
+    const hands = new Hands({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+      }
+    });
+
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+
+    hands.onResults(results => {
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!results.multiHandLandmarks) {
+        return;
+      }
+
+      for (const landmarks of results.multiHandLandmarks) {
+
+        drawHand(landmarks);
+
+        // Detectar pellizco
+        const thumb = landmarks[4];
+        const index = landmarks[8];
+
+        const dx = thumb.x - index.x;
+        const dy = thumb.y - index.y;
+
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 0.06) {
+          showMessage("🤏 PELLIZCO DETECTADO");
+        }
+      }
+    });
+
+
+    // -----------------------------
+    // DIBUJAR MANO
+    // -----------------------------
+
+    function drawHand(landmarks) {
+
+      const connections = [
+        [0,1],[1,2],[2,3],[3,4],
+        [0,5],[5,6],[6,7],[7,8],
+        [0,9],[9,10],[10,11],[11,12],
+        [0,13],[13,14],[14,15],[15,16],
+        [0,17],[17,18],[18,19],[19,20],
+
+        [5,9],
+        [9,13],
+        [13,17]
+      ];
+
+      // líneas
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "lime";
+
+      for (const [a,b] of connections) {
+
+        const x1 = landmarks[a].x * canvas.width;
+        const y1 = landmarks[a].y * canvas.height;
+
+        const x2 = landmarks[b].x * canvas.width;
+        const y2 = landmarks[b].y * canvas.height;
+
+        ctx.beginPath();
+        ctx.moveTo(x1,y1);
+        ctx.lineTo(x2,y2);
+        ctx.stroke();
+      }
+
+      // puntos
+      ctx.fillStyle = "white";
+
+      for (const p of landmarks) {
+
+        const x = p.x * canvas.width;
+        const y = p.y * canvas.height;
+
+        ctx.beginPath();
+        ctx.arc(x,y,6,0,Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+
+    // -----------------------------
+    // MENSAJE
+    // -----------------------------
+
+    let messageTimer;
+
+    function showMessage(text) {
+
+      clearTimeout(messageTimer);
+
+      info.innerHTML =
+        text +
+        "<br><small>Hand Tracking activo</small>";
+
+      messageTimer = setTimeout(() => {
+
+        info.innerHTML =
+          "🖐️ Hand Tracking<br>" +
+          "<small>Mueve las manos delante de la cámara</small>";
+
+      }, 700);
+    }
+
+
+    // -----------------------------
+    // ACTIVAR CÁMARA
+    // -----------------------------
+
+    startButton.onclick = async () => {
+
+      try {
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        video.srcObject = stream;
+
+        running = true;
+
+        startButton.style.display = "none";
+        vrButton.style.display = "inline-block";
+
+        startTracking();
+
+      } catch (error) {
+
+        alert(
+          "No se pudo acceder a la cámara.\n\n" +
+          "Comprueba que has dado permiso a la cámara y que la página utiliza HTTPS."
+        );
+
+        console.error(error);
+      }
+    };
+
+
+    // -----------------------------
+    // TRACKING
+    // -----------------------------
+
+    async function startTracking() {
+
+      const camera = new Camera(video, {
+        onFrame: async () => {
+
+          if (running) {
+            await hands.send({
+              image: video
+            });
+          }
+
+        },
+
+        width: 1280,
+        height: 720
+      });
+
+      camera.start();
+    }
+
+
+    // -----------------------------
+    // CARDBOARD
+    // -----------------------------
+
+    vrButton.onclick = () => {
+
+      document.documentElement.requestFullscreen?.();
+
+      info.style.display = "none";
+
+      startCardboard();
+    };
+
+
+    function startCardboard() {
+
+      canvas.style.display = "none";
+
+      document.body.innerHTML += `
+        <div id="cardboard">
+          <div class="eye">
+            <canvas id="leftEye"></canvas>
+          </div>
+
+          <div class="eye">
+            <canvas id="rightEye"></canvas>
+          </div>
+        </div>
+      `;
+
+      const style = document.createElement("style");
+
+      style.textContent = `
+        #cardboard {
+          position:fixed;
+          inset:0;
+          display:flex;
+          background:black;
+        }
+
+        .eye {
+          width:50%;
+          height:100%;
+          overflow:hidden;
+          position:relative;
+          border:1px solid #222;
+        }
+
+        .eye canvas {
+          width:100%;
+          height:100%;
+        }
+      `;
+
+      document.head.appendChild(style);
+
+      const left = document.getElementById("leftEye");
+      const right = document.getElementById("rightEye");
+
+      const leftCtx = left.getContext("2d");
+      const rightCtx = right.getContext("2d");
+
+      function eyeResize() {
+
+        left.width = window.innerWidth / 2;
+        left.height = window.innerHeight;
+
+        right.width = window.innerWidth / 2;
+        right.height = window.innerHeight;
+      }
+
+      eyeResize();
+
+      window.addEventListener("resize", eyeResize);
+
+      function drawEyes() {
+
+        if (!running) return;
+
+        leftCtx.save();
+        rightCtx.save();
+
+        leftCtx.clearRect(0,0,left.width,left.height);
+        rightCtx.clearRect(0,0,right.width,right.height);
+
+        // Fondo
+        leftCtx.fillStyle = "#101010";
+        rightCtx.fillStyle = "#101010";
+
+        leftCtx.fillRect(0,0,left.width,left.height);
+        rightCtx.fillRect(0,0,right.width,right.height);
+
+        // Texto de prueba
+        leftCtx.fillStyle = "white";
+        rightCtx.fillStyle = "white";
+
+        leftCtx.font = "22px Arial";
+        rightCtx.font = "22px Arial";
+
+        leftCtx.fillText("CARDBOARD",20,40);
+        rightCtx.fillText("CARDBOARD",20,40);
+
+        leftCtx.restore();
+        rightCtx.restore();
+
+        requestAnimationFrame(drawEyes);
+      }
+
+      drawEyes();
+    }
+
+  </script>
+
+</body>
+</html>
